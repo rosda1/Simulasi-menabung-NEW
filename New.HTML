@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Generator Rencana Tabungan</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global Firebase variables
+        window.firebaseApp = null;
+        window.db = null;
+        window.auth = null;
+        window.currentUserId = null;
+        window.isAuthReady = false; 
+
+        // Get app-specific config from the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                // Initialize Firebase
+                window.firebaseApp = initializeApp(firebaseConfig);
+                window.db = getFirestore(window.firebaseApp);
+                window.auth = getAuth(window.firebaseApp);
+                setLogLevel('debug'); // Enable detailed logs for debugging
+
+                // Listen for authentication state changes
+                onAuthStateChanged(window.auth, async (user) => {
+                    if (user) {
+                        window.currentUserId = user.uid;
+                        console.log("Authenticated with UID:", window.currentUserId);
+                    } else {
+                        // If no user, sign in
+                        try {
+                            if (initialAuthToken) {
+                                await signInWithCustomToken(window.auth, initialAuthToken);
+                            } else {
+                                await signInAnonymously(window.auth);
+                            }
+                            window.currentUserId = window.auth.currentUser?.uid;
+                            console.log("Signed in anonymously or with custom token. UID:", window.currentUserId);
+                        } catch (error) {
+                            console.error("Firebase Auth Error:", error);
+                            // Fallback to a random ID if authentication fails
+                            window.currentUserId = crypto.randomUUID();
+                            console.warn("Authentication failed, using random user ID:", window.currentUserId);
+                        }
+                    }
+                    window.isAuthReady = true;
+                    // Notify the rest of the app that authentication is ready
+                    document.dispatchEvent(new CustomEvent('firebaseAuthReady'));
+                });
+
+            } catch (error) {
+                console.error("Error initializing Firebase:", error);
+                // Fallback if Firebase initialization fails completely
+                window.currentUserId = crypto.randomUUID();
+                window.isAuthReady = true;
+                document.dispatchEvent(new CustomEvent('firebaseAuthReady'));
+            }
+        });
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #3730a3; /* indigo-800 */
+        }
+        #background-container {
+            position: fixed;
+            inset: 0;
+            z-index: -2;
+            background-color: #3730a3;
+            background-image:
+                radial-gradient(at 27% 37%, hsla(222,98%,62%,1) 0px, transparent 50%),
+                radial-gradient(at 97% 21%, hsla(190,78%,62%,1) 0px, transparent 50%),
+                radial-gradient(at 52% 99%, hsla(326,77%,62%,1) 0px, transparent 50%),
+                radial-gradient(at 10% 29%, hsla(278,70%,68%,1) 0px, transparent 50%),
+                radial-gradient(at 97% 96%, hsla(339,68%,68%,1) 0px, transparent 50%),
+                radial-gradient(at 33% 50%, hsla(222,67%,73%,1) 0px, transparent 50%),
+                radial-gradient(at 79% 53%, hsla(343,68%,73%,1) 0px, transparent 50%);
+        }
+        #background-image-layer {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            background-size: cover;
+            background-position: center;
+            opacity: 0;
+            transition: opacity 0.7s ease-in-out;
+        }
+        #background-image-layer::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background-color: rgba(26, 31, 56, 0.5); /* Semi-transparent overlay */
+        }
+        .radio-card:checked + label {
+            border-color: #22d3ee; /* cyan-400 */
+            box-shadow: 0 0 15px rgba(34, 211, 238, 0.4);
+        }
+        .radio-card:checked + label .radio-dot {
+            background-color: #22d3ee; /* cyan-400 */
+            border-color: #22d3ee; /* cyan-400 */
+        }
+        .radio-card:checked + label .radio-dot::after {
+            transform: scale(1);
+        }
+        .progress-bar-inner {
+            transition: width 0.5s ease-in-out;
+        }
+        .glass-panel {
+            background: rgba(26, 31, 56, 0.6); /* Slightly transparent indigo */
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(79, 70, 229, 0.5); /* Indigo border */
+        }
+        .goal-card {
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .goal-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(34, 211, 238, 0.2);
+        }
+        /* Loading spinner styles */
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #fff;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Image loading spinner specific styles */
+        .image-spinner {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+        }
+    </style>
+</head>
+<body class="text-indigo-100 flex items-center justify-center p-4">
+    
+    <!-- Dynamic Background Containers -->
+    <div id="background-container"></div>
+    <div id="background-image-layer"></div>
+
+    <div class="w-full max-w-2xl mx-auto">
+        <!-- User ID Display -->
+        <div class="text-center text-sm text-indigo-300 mb-4" id="user-id-display">
+            Memuat ID Pengguna...
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loading-indicator" class="flex flex-col items-center justify-center h-64">
+            <div class="spinner mb-4"></div>
+            <p class="text-white text-lg">Memuat impianmu...</p>
+        </div>
+
+        <!-- Goals Hub (Main View) -->
+        <div id="goals-hub" class="hidden">
+            <header class="text-center mb-8">
+                <h1 class="text-3xl md:text-4xl font-bold text-white tracking-tight">Daftar Impianku</h1>
+                <p class="text-indigo-300 mt-2">Pilih impian untuk melihat detail atau buat yang baru!</p>
+            </header>
+            <div id="goals-list" class="space-y-4 mb-6">
+                <!-- Goal cards will be inserted here by JS -->
+            </div>
+            <button id="hub-new-plan-button" class="w-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold py-3 px-4 rounded-lg hover:opacity-90 transition-all duration-300 shadow-lg shadow-cyan-500/30 text-lg">
+                ✨ Buat Impian Baru
+            </button>
+        </div>
+
+        <!-- Form Section (Now hidden by default) -->
+        <div id="generator-form" class="hidden">
+            <header class="text-center mb-8">
+                <h1 class="text-3xl md:text-4xl font-bold text-white tracking-tight">AI Generator Rencana Tabungan</h1>
+                <p class="text-indigo-300 mt-2">Wujudkan impianmu dengan rencana tabungan yang asyik!</p>
+            </header>
+            <form id="savings-form" class="space-y-6">
+                <!-- Form content -->
+                <div class="glass-panel p-6 rounded-xl shadow-lg">
+                    <h2 class="text-xl font-semibold text-white mb-4 border-b border-indigo-700 pb-2">Langkah 1: Tentukan Impianmu</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="goalName" class="block text-sm font-medium text-indigo-200 mb-1">Nama Tujuan Tabungan</label>
+                            <input type="text" id="goalName" class="w-full bg-indigo-900/70 border border-indigo-700 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 outline-none" placeholder="Contoh: Laptop Baru" required>
+                        </div>
+                        <div>
+                            <label for="targetAmount" class="block text-sm font-medium text-indigo-200 mb-1">Target Dana (Rp)</label>
+                            <input type="number" id="targetAmount" class="w-full bg-indigo-900/70 border border-indigo-700 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 outline-none" placeholder="Contoh: 15000000" required>
+                        </div>
+                        <div>
+                            <label for="initialAmount" class="block text-sm font-medium text-indigo-200 mb-1">Dana Awal (Rp, Opsional)</label>
+                            <input type="number" id="initialAmount" class="w-full bg-indigo-900/70 border border-indigo-700 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 outline-none" placeholder="Contoh: 1000000">
+                        </div>
+                        <div>
+                            <label for="targetDate" class="block text-sm font-medium text-indigo-200 mb-1">Tanggal Target</label>
+                            <input type="date" id="targetDate" class="w-full bg-indigo-900/70 border border-indigo-700 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 outline-none" required>
+                        </div>
+                    </div>
+                </div>
+                <div class="glass-panel p-6 rounded-xl shadow-lg">
+                    <h2 class="text-xl font-semibold text-white mb-4 border-b border-indigo-700 pb-2">Langkah 2: Pilih Gaya Menabungmu</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="relative"><input type="radio" id="style-consistent" name="savingStyle" value="consistent" class="hidden radio-card" checked><label for="style-consistent" class="flex flex-col p-4 border-2 border-indigo-700 rounded-lg cursor-pointer transition-all hover:border-cyan-400 bg-indigo-900/50 h-full"><div class="flex items-center justify-between"><span class="text-lg font-bold">🐢 Konsisten</span><div class="w-5 h-5 border-2 border-indigo-500 rounded-full flex items-center justify-center radio-dot"><div class="w-2.5 h-2.5 rounded-full bg-transparent transition-transform transform scale-0"></div></div></div><p class="text-indigo-300 text-sm mt-1">Jumlah tetap setiap periode. Stabil dan pasti.</p></label></div>
+                        <div class="relative"><input type="radio" id="style-challenge" name="savingStyle" value="challenge" class="hidden radio-card"><label for="style-challenge" class="flex flex-col p-4 border-2 border-indigo-700 rounded-lg cursor-pointer transition-all hover:border-cyan-400 bg-indigo-900/50 h-full"><div class="flex items-center justify-between"><span class="text-lg font-bold">📅 Tantangan</span><div class="w-5 h-5 border-2 border-indigo-500 rounded-full flex items-center justify-center radio-dot"><div class="w-2.5 h-2.5 rounded-full bg-transparent transition-transform transform scale-0"></div></div></div><p class="text-indigo-300 text-sm mt-1">Mulai kecil, bertambah setiap minggu.</p></label></div>
+                        <div class="relative"><input type="radio" id="style-aggressive" name="savingStyle" value="aggressive" class="hidden radio-card"><label for="style-aggressive" class="flex flex-col p-4 border-2 border-indigo-700 rounded-lg cursor-pointer transition-all hover:border-cyan-400 bg-indigo-900/50 h-full"><div class="flex items-center justify-between"><span class="text-lg font-bold">🐆 Agresif</span><div class="w-5 h-5 border-2 border-indigo-500 rounded-full flex items-center justify-center radio-dot"><div class="w-2.5 h-2.5 rounded-full bg-transparent transition-transform transform scale-0"></div></div></div><p class="text-indigo-300 text-sm mt-1">Target mingguan lebih tinggi, capai lebih cepat.</p></label></div>
+                    </div>
+                </div>
+                <div class="glass-panel p-6 rounded-xl shadow-lg">
+                    <h2 class="text-xl font-semibold text-white mb-4 border-b border-indigo-700 pb-2">Langkah 3: Personalisasi</h2>
+                    <div>
+                        <label for="motivationQuote" class="block text-sm font-medium text-indigo-200 mb-1">Kutipan Motivasi (Opsional)</label>
+                        <textarea id="motivationQuote" rows="3" class="w-full bg-indigo-900/70 border border-indigo-700 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 outline-none" placeholder="Tulis kutipan penyemangatmu..."></textarea>
+                    </div>
+                </div>
+                <button type="submit" class="w-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-bold py-3 px-4 rounded-lg hover:opacity-90 transition-all duration-300 shadow-lg shadow-cyan-500/30 text-lg">
+                    Simpan Rencana Impian!
+                </button>
+                <button type="button" id="cancel-form-button" class="w-full bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-indigo-700 transition-all duration-300 mt-2">
+                    Batal
+                </button>
+            </form>
+        </div>
+
+        <!-- Dashboard Section (Detail View, hidden by default) -->
+        <div id="dashboard" class="hidden">
+            <div class="glass-panel rounded-2xl shadow-2xl overflow-hidden">
+                <div id="dashboard-header" class="relative h-48 md:h-64 bg-indigo-900 flex items-center justify-center">
+                    <!-- Image will be generated here -->
+                    <img id="dashboard-photo" src="" alt="Foto Tujuan Tabungan" class="w-full h-full object-cover absolute inset-0">
+                    <div id="image-loading-spinner" class="image-spinner hidden">
+                        <div class="spinner"></div>
+                    </div>
+                    <div class="absolute inset-0 bg-gradient-to-t from-indigo-900 via-indigo-900/70 to-transparent"></div>
+                    <div class="absolute bottom-0 left-0 p-6">
+                        <h1 id="dashboard-goalName" class="text-3xl md:text-4xl font-bold text-white">Nama Tujuan</h1>
+                        <p id="dashboard-targetDate" class="text-cyan-300">Target: 31 Desember 2025</p>
+                    </div>
+                </div>
+
+                <div class="p-6 space-y-6">
+                    <!-- Progress Bar, Stats Grid, Add Funds, AI Plan, Quote -->
+                    <div>
+                        <div class="flex justify-between items-end mb-1"><span class="text-sm font-medium text-indigo-200">Progres</span><span id="progress-text" class="text-sm font-bold text-white">Rp 0 / 10 Juta</span></div>
+                        <div class="w-full bg-indigo-900/80 rounded-full h-4"><div id="progress-bar" class="bg-gradient-to-r from-cyan-400 to-fuchsia-500 h-4 rounded-full progress-bar-inner" style="width: 0%"></div></div>
+                    </div>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                        <div class="bg-indigo-900/60 p-4 rounded-lg"><h3 class="text-sm text-indigo-300">Dana Terkumpul</h3><p id="stat-collected" class="text-xl font-bold text-white">Rp 0</p></div>
+                        <div class="bg-indigo-900/60 p-4 rounded-lg"><h3 class="text-sm text-indigo-300">Sisa Kebutuhan</h3><p id="stat-remaining" class="text-xl font-bold text-fuchsia-400">10 Juta</p></div>
+                        <div class="bg-indigo-900/60 p-4 rounded-lg"><h3 class="text-sm text-indigo-300">Sisa Waktu</h3><p id="stat-timeleft" class="text-xl font-bold text-white">365 Hari</p></div>
+                        <div class="bg-indigo-900/60 p-4 rounded-lg"><h3 class="text-sm text-indigo-300">Persentase</h3><p id="stat-percentage" class="text-xl font-bold text-cyan-400">0%</p></div>
+                    </div>
+                    <div class="bg-indigo-900/60 p-4 rounded-lg">
+                        <h3 class="text-lg font-semibold text-white mb-2">💰 Catat Tabungan Baru</h3>
+                        <div class="flex items-center gap-2">
+                            <input type="number" id="addFundsInput" class="w-full bg-indigo-800/70 border border-indigo-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 outline-none" placeholder="Jumlah (Rp)">
+                            <button id="addFundsButton" class="bg-cyan-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-cyan-600 transition-colors whitespace-nowrap">Tambah Dana</button>
+                        </div>
+                    </div>
+
+                    <!-- Savings History Section -->
+                    <div id="history-section" class="bg-indigo-900/60 p-4 rounded-lg">
+                        <h3 class="text-lg font-semibold text-white mb-3">📖 Riwayat Tabungan</h3>
+                        <div id="history-list-container" class="max-h-48 overflow-y-auto pr-2 space-y-2">
+                            <!-- History items will be inserted here by JS -->
+                        </div>
+                        <p id="history-empty-message" class="text-center text-indigo-400 italic py-4">Belum ada riwayat tabungan.</p>
+                    </div>
+
+                    <div class="bg-black/20 p-6 rounded-xl border border-cyan-500/30"><h2 class="text-xl font-semibold text-white mb-3">🚀 Rencana Aksi dari AI</h2><p id="ai-plan" class="text-indigo-200 text-lg leading-relaxed">...</p></div>
+                    <div id="quote-section" class="hidden text-center italic text-indigo-300 p-4 bg-indigo-900/60 rounded-lg"><p id="dashboard-quote">"..."</p></div>
+
+                    <button id="back-to-hub-button" class="w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-indigo-700 transition-all duration-300 mt-4">
+                        Kembali ke Daftar Impian
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Error Modal -->
+        <div id="errorModal" class="hidden fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4"><div class="bg-red-900/80 backdrop-blur-sm rounded-lg shadow-xl p-6 w-11/12 max-w-sm text-center border border-red-400"><h3 class="text-xl font-bold text-red-300 mb-2">Oops! Ada yang Kurang</h3><p id="errorMessage" class="text-white mb-4">Pesan error.</p><button id="closeModalButton" class="bg-red-500 text-white font-bold py-2 px-6 rounded-lg hover:bg-red-600 transition-colors">Tutup</button></div></div>
+    </div>
+
+    <script type="module">
+        // Import necessary Firestore functions
+        import { collection, addDoc, updateDoc, onSnapshot, doc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        document.addEventListener('DOMContentLoaded', function () {
+            // --- Get All View Elements ---
+            const goalsHubView = document.getElementById('goals-hub');
+            const generatorFormView = document.getElementById('generator-form');
+            const dashboardView = document.getElementById('dashboard');
+            const loadingIndicator = document.getElementById('loading-indicator');
+            const userIdDisplay = document.getElementById('user-id-display');
+            const backgroundImageLayer = document.getElementById('background-image-layer');
+
+
+            const views = {
+                'hub': goalsHubView,
+                'form': generatorFormView,
+                'dashboard': dashboardView
+            };
+
+            // --- Get All Interactive Elements ---
+            const savingsForm = document.getElementById('savings-form');
+            const goalsList = document.getElementById('goals-list');
+            const hubNewPlanButton = document.getElementById('hub-new-plan-button');
+            const cancelFormButton = document.getElementById('cancel-form-button');
+            const backToHubButton = document.getElementById('back-to-hub-button');
+            const addFundsButton = document.getElementById('addFundsButton');
+            const addFundsInput = document.getElementById('addFundsInput');
+            const dashboardPhoto = document.getElementById('dashboard-photo');
+            const imageLoadingSpinner = document.getElementById('image-loading-spinner');
+            const closeModalButton = document.getElementById('closeModalButton');
+            const errorModal = document.getElementById('errorModal');
+            const errorMessage = document.getElementById('errorMessage');
+            
+            // --- State Management ---
+            let allGoals = [];
+            let activeGoalId = null;
+            let unsubscribe = null; // To store the onSnapshot listener
+
+            // --- Firebase Setup (Listener for auth ready) ---
+            document.addEventListener('firebaseAuthReady', () => {
+                loadingIndicator.classList.add('hidden'); // Hide loading spinner
+                userIdDisplay.innerText = `ID Pengguna: ${window.currentUserId}`; // Display user ID
+                resetDynamicBackground(); // Start with the default background
+
+                if (unsubscribe) unsubscribe(); // Detach any old listener
+
+                if (window.db && window.currentUserId) {
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                    const goalsCollectionRef = collection(window.db, `artifacts/${appId}/users/${window.currentUserId}/savingGoals`);
+                    const q = query(goalsCollectionRef);
+
+                    unsubscribe = onSnapshot(q, (snapshot) => {
+                        allGoals = snapshot.docs.map(doc => ({
+                            id: doc.id,
+                            ...doc.data(),
+                            history: doc.data().history || [] // Ensure history is always an array
+                        }));
+                        console.log("Goals fetched/updated from Firestore:", allGoals);
+                        
+                        // Determine the current view and update accordingly
+                        if (document.getElementById('dashboard').classList.contains('hidden') && document.getElementById('generator-form').classList.contains('hidden')) {
+                             renderGoalsHub();
+                             showView('hub');
+                        } else if (activeGoalId) {
+                            const currentActiveGoal = allGoals.find(g => g.id === activeGoalId);
+                            if (currentActiveGoal) {
+                                // Re-populate dashboard with the latest data
+                                populateDashboard(currentActiveGoal);
+                            } else {
+                                // If the active goal was deleted, go back to hub
+                                activeGoalId = null;
+                                showView('hub');
+                                renderGoalsHub();
+                            }
+                        }
+                    }, (error) => {
+                        console.error("Error listening to Firestore:", error);
+                        showErrorModal("Gagal memuat data impian. Coba refresh halaman.");
+                        showView('hub'); 
+                    });
+                } else {
+                    showErrorModal("Firebase tidak terinisialisasi. Coba refresh halaman.");
+                    showView('hub');
+                }
+            });
+
+            // --- Utility Functions ---
+            
+            function formatCurrency(num) {
+                if (isNaN(num)) return "Rp 0";
+                if (num >= 1e12) return `Rp ${(num / 1e12).toFixed(2).replace('.', ',')} T`;
+                if (num >= 1e9) return `Rp ${(num / 1e9).toFixed(2).replace('.', ',')} M`;
+                if (num >= 1e6) return `Rp ${(num / 1e6).toFixed(2).replace('.', ',')} Jt`;
+                if (num >= 1e3) return `Rp ${(num / 1e3).toFixed(0)} Rb`;
+                return `Rp ${new Intl.NumberFormat('id-ID').format(num)}`;
+            }
+
+            function showErrorModal(message) {
+                errorMessage.textContent = message;
+                errorModal.classList.remove('hidden');
+            }
+            
+            // --- NEW: Background Functions ---
+            function setDynamicBackground(goalName) {
+                // Use Unsplash Source to get a random image based on the goal name
+                const imageUrl = `https://source.unsplash.com/1920x1080/?${encodeURIComponent(goalName)}`;
+                backgroundImageLayer.style.backgroundImage = `url('${imageUrl}')`;
+                backgroundImageLayer.style.opacity = 1;
+            }
+
+            function resetDynamicBackground() {
+                backgroundImageLayer.style.opacity = 0;
+                // Optional: clear the image after transition to save memory
+                setTimeout(() => {
+                    backgroundImageLayer.style.backgroundImage = '';
+                }, 700);
+            }
+
+
+            // --- Main App Logic ---
+
+            function showView(viewName) {
+                Object.values(views).forEach(view => view.classList.add('hidden'));
+                if (views[viewName]) {
+                    views[viewName].classList.remove('hidden');
+                }
+                window.scrollTo(0, 0);
+            }
+
+            function renderGoalsHub() {
+                resetDynamicBackground(); // Reset background when showing the hub
+                goalsList.innerHTML = ''; 
+                if (allGoals.length === 0) {
+                    goalsList.innerHTML = `<div class="text-center glass-panel p-8 rounded-xl">
+                        <h2 class="text-2xl font-bold text-white mb-2">Selamat Datang!</h2>
+                        <p class="text-indigo-300">Kamu belum punya rencana tabungan. Yuk, buat impian pertamamu sekarang juga!</p>
+                    </div>`;
+                } else {
+                    const sortedGoals = [...allGoals].sort((a, b) => new Date(a.targetDate) - new Date(b.targetDate));
+                    sortedGoals.forEach(goal => {
+                        const currentAmount = goal.currentAmount || 0;
+                        const targetAmount = goal.targetAmount || 1; // Avoid division by zero
+                        const percentage = Math.min((currentAmount / targetAmount) * 100, 100);
+                        const card = document.createElement('div');
+                        card.className = 'glass-panel p-4 rounded-xl goal-card cursor-pointer';
+                        card.dataset.goalId = goal.id;
+                        card.innerHTML = `
+                            <div class="flex justify-between items-center mb-2">
+                                <h3 class="text-xl font-bold text-white">${goal.name}</h3>
+                                <span class="font-semibold text-cyan-300">${percentage.toFixed(1)}%</span>
+                            </div>
+                            <div class="w-full bg-indigo-900/80 rounded-full h-3">
+                                <div class="bg-gradient-to-r from-cyan-400 to-fuchsia-500 h-3 rounded-full" style="width: ${percentage}%"></div>
+                            </div>
+                            <p class="text-right text-sm text-indigo-300 mt-1">${formatCurrency(currentAmount)} / ${formatCurrency(targetAmount)}</p>
+                        `;
+                        card.addEventListener('click', () => {
+                            activeGoalId = goal.id;
+                            populateDashboard(goal);
+                            showView('dashboard');
+                        });
+                        goalsList.appendChild(card);
+                    });
+                }
+            }
+
+            function populateDashboard(goal) {
+                activeGoalId = goal.id; // Ensure active ID is set
+                setDynamicBackground(goal.name); // Set background based on goal name
+                document.getElementById('dashboard-goalName').innerText = goal.name;
+                document.getElementById('dashboard-targetDate').innerText = `Target: ${new Date(goal.targetDate).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' })}`;
+
+                if (goal.photoSrc) {
+                    dashboardPhoto.src = goal.photoSrc;
+                    dashboardPhoto.classList.remove('hidden');
+                    imageLoadingSpinner.classList.add('hidden');
+                } else {
+                    generateAndSetGoalImage(goal.name, goal.id);
+                }
+                
+                document.getElementById('ai-plan').innerText = goal.aiPlan || "Rencana AI sedang dibuat...";
+
+                const quoteSection = document.getElementById('quote-section');
+                if (goal.quote) {
+                    document.getElementById('dashboard-quote').innerText = `"${goal.quote}"`;
+                    quoteSection.classList.remove('hidden');
+                } else {
+                    quoteSection.classList.add('hidden');
+                }
+
+                updateDashboardStats(goal);
+                renderHistory(goal);
+            }
+            
+            function updateDashboardStats(goal) {
+                const currentAmount = goal.currentAmount || 0;
+                const targetAmount = goal.targetAmount || 1;
+                const remainingAmount = Math.max(0, targetAmount - currentAmount);
+                const percentage = Math.min((currentAmount / targetAmount) * 100, 100);
+                const daysLeft = Math.ceil(Math.max(0, (new Date(goal.targetDate) - new Date()) / (1000 * 60 * 60 * 24)));
+
+                document.getElementById('progress-text').innerText = `${formatCurrency(currentAmount)} / ${formatCurrency(targetAmount)}`;
+                document.getElementById('progress-bar').style.width = `${percentage}%`;
+                
+                document.getElementById('stat-collected').innerText = formatCurrency(currentAmount);
+                document.getElementById('stat-remaining').innerText = formatCurrency(remainingAmount);
+                document.getElementById('stat-timeleft').innerText = `${daysLeft} Hari`;
+                document.getElementById('stat-percentage').innerText = `${percentage.toFixed(1)}%`;
+            }
+
+            function renderHistory(goal) {
+                const historyContainer = document.getElementById('history-list-container');
+                const emptyMessage = document.getElementById('history-empty-message');
+                historyContainer.innerHTML = '';
+
+                if (!goal.history || goal.history.length === 0) {
+                    emptyMessage.classList.remove('hidden');
+                } else {
+                    emptyMessage.classList.add('hidden');
+                    // Sort history from newest to oldest
+                    const sortedHistory = [...goal.history].sort((a, b) => new Date(b.date) - new Date(a.date));
+                    
+                    sortedHistory.forEach(item => {
+                        const historyItem = document.createElement('div');
+                        historyItem.className = 'flex justify-between items-center bg-indigo-800/50 p-2 rounded-md';
+                        historyItem.innerHTML = `
+                            <span class="text-white font-medium">${formatCurrency(item.amount)}</span>
+                            <span class="text-sm text-indigo-300">${new Date(item.date).toLocaleDateString('id-ID')}</span>
+                        `;
+                        historyContainer.appendChild(historyItem);
+                    });
+                }
+            }
+
+            async function generateAndSetGoalImage(goalName, goalId) {
+                dashboardPhoto.classList.add('hidden');
+                imageLoadingSpinner.classList.remove('hidden');
+
+                const prompt = `A beautiful, photorealistic image of a ${goalName}. Centered object, studio lighting, on a clean, modern background. Symbolizes achieving a financial goal. No text.`;
+                const apiKey = ""; // Canvas provides this
+
+                const payload = { instances: { prompt: prompt }, parameters: { "sampleCount": 1} };
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
+
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const result = await response.json();
+
+                    if (result.predictions && result.predictions[0]?.bytesBase64Encoded) {
+                        const imageUrl = `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
+                        dashboardPhoto.src = imageUrl;
+                        
+                        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                        const goalDocRef = doc(window.db, `artifacts/${appId}/users/${window.currentUserId}/savingGoals`, goalId);
+                        await updateDoc(goalDocRef, { photoSrc: imageUrl });
+                    } else {
+                        throw new Error("No image data in response");
+                    }
+                } catch (error) {
+                    console.error("Error generating image:", error);
+                    dashboardPhoto.src = `https://placehold.co/800x400/312e81/a5b4fc?text=${encodeURIComponent('Gambar Gagal Dimuat')}`;
+                } finally {
+                    dashboardPhoto.classList.remove('hidden');
+                    imageLoadingSpinner.classList.add('hidden');
+                }
+            }
+            
+            async function generateAiPlan(goalData) {
+                const { name, targetAmount, initialAmount, targetDate, savingStyle } = goalData;
+                const remainingAmount = targetAmount - (initialAmount || 0);
+                const daysLeft = Math.ceil((new Date(targetDate) - new Date()) / (1000 * 60 * 60 * 24));
+                const weeksLeft = Math.ceil(daysLeft / 7);
+
+                let prompt = `Buatkan rencana tabungan yang singkat, memotivasi, dan actionable dalam bahasa Indonesia untuk mencapai tujuan "${name}" dengan target Rp ${targetAmount.toLocaleString('id-ID')}. 
+                Sisa dana yang dibutuhkan: Rp ${remainingAmount.toLocaleString('id-ID')}.
+                Sisa waktu: ${daysLeft} hari (sekitar ${weeksLeft} minggu). 
+                Gaya menabung yang dipilih: "${savingStyle}". 
+                Berikan rekomendasi tabungan per minggu atau per bulan yang jelas. 
+                Buat dalam 1 paragraf singkat dan positif.`;
+
+                const apiKey = ""; // Canvas provides this
+                const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const result = await response.json();
+                    if (result.candidates && result.candidates[0]?.content?.parts[0]?.text) {
+                        return result.candidates[0].content.parts[0].text;
+                    } else {
+                        throw new Error("Invalid AI response structure");
+                    }
+                } catch (error) {
+                    console.error("Error generating AI plan:", error);
+                    return "Tidak dapat membuat rencana AI saat ini. Fokus menabung secara konsisten setiap minggu untuk mencapai tujuanmu!";
+                }
+            }
+
+            // --- Event Listeners ---
+
+            savingsForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const submitButton = e.target.querySelector('button[type="submit"]');
+                submitButton.disabled = true;
+                submitButton.innerHTML = '<div class="spinner mx-auto" style="width: 24px; height: 24px;"></div>';
+
+                const goalName = document.getElementById('goalName').value;
+                const targetAmount = parseFloat(document.getElementById('targetAmount').value);
+                const initialAmount = parseFloat(document.getElementById('initialAmount').value) || 0;
+                const targetDate = document.getElementById('targetDate').value;
+                const savingStyle = document.querySelector('input[name="savingStyle"]:checked').value;
+                const motivationQuote = document.getElementById('motivationQuote').value;
+
+                if (!goalName || !targetAmount || !targetDate) {
+                    showErrorModal("Nama tujuan, target dana, dan tanggal target harus diisi.");
+                    submitButton.disabled = false;
+                    submitButton.innerText = 'Simpan Rencana Impian!';
+                    return;
+                }
+                if (new Date(targetDate) <= new Date()) {
+                     showErrorModal("Tanggal target harus di masa depan.");
+                    submitButton.disabled = false;
+                    submitButton.innerText = 'Simpan Rencana Impian!';
+                    return;
+                }
+
+                try {
+                    const aiPlan = await generateAiPlan({ name: goalName, targetAmount, initialAmount, targetDate, savingStyle });
+
+                    const newGoal = {
+                        name: goalName,
+                        targetAmount: targetAmount,
+                        initialAmount: initialAmount,
+                        currentAmount: initialAmount,
+                        targetDate: targetDate,
+                        savingStyle: savingStyle,
+                        quote: motivationQuote,
+                        aiPlan: aiPlan,
+                        photoSrc: null, // Will be generated after creation
+                        createdAt: new Date().toISOString(),
+                        history: initialAmount > 0 ? [{ amount: initialAmount, date: new Date().toISOString() }] : []
+                    };
+                    
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                    const goalsCollectionRef = collection(window.db, `artifacts/${appId}/users/${window.currentUserId}/savingGoals`);
+                    const docRef = await addDoc(goalsCollectionRef, newGoal);
+                    
+                    activeGoalId = docRef.id;
+                    const completeNewGoal = { ...newGoal, id: docRef.id };
+                    
+                    populateDashboard(completeNewGoal);
+                    showView('dashboard');
+                    savingsForm.reset();
+
+                } catch (error) {
+                    console.error("Error saving goal:", error);
+                    showErrorModal("Gagal menyimpan impian. Periksa koneksi internetmu.");
+                } finally {
+                    submitButton.disabled = false;
+                    submitButton.innerText = 'Simpan Rencana Impian!';
+                }
+            });
+
+            addFundsButton.addEventListener('click', async () => {
+                const amount = parseFloat(addFundsInput.value);
+                if (!amount || amount <= 0 || !activeGoalId) {
+                    showErrorModal("Masukkan jumlah dana yang valid.");
+                    return;
+                }
+
+                const currentGoal = allGoals.find(g => g.id === activeGoalId);
+                if (!currentGoal) {
+                    showErrorModal("Tujuan tidak ditemukan. Coba lagi.");
+                    return;
+                }
+
+                const newCurrentAmount = (currentGoal.currentAmount || 0) + amount;
+                const newHistoryEntry = { amount: amount, date: new Date().toISOString() };
+                const updatedHistory = [...(currentGoal.history || []), newHistoryEntry];
+                
+                addFundsButton.disabled = true;
+
+                try {
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                    const goalDocRef = doc(window.db, `artifacts/${appId}/users/${window.currentUserId}/savingGoals`, activeGoalId);
+                    await updateDoc(goalDocRef, {
+                        currentAmount: newCurrentAmount,
+                        history: updatedHistory
+                    });
+                    addFundsInput.value = ''; // Clear input on success
+                } catch (error) {
+                    console.error("Error adding funds:", error);
+                    showErrorModal("Gagal menambah dana. Coba lagi.");
+                } finally {
+                    addFundsButton.disabled = false;
+                }
+            });
+
+            hubNewPlanButton.addEventListener('click', () => {
+                showView('form');
+            });
+
+            cancelFormButton.addEventListener('click', () => {
+                showView('hub');
+                renderGoalsHub();
+            });
+
+            backToHubButton.addEventListener('click', () => {
+                activeGoalId = null;
+                showView('hub');
+                renderGoalsHub();
+            });
+
+            closeModalButton.addEventListener('click', () => {
+                errorModal.classList.add('hidden');
+            });
+        });
+    </script>
+</body>
+</html>
